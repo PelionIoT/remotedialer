@@ -43,9 +43,15 @@ func (w *wsConn) setupDeadline() {
 		if err != nil {
 			return err
 		}
+		if err := w.conn.SetReadDeadline(time.Now().Add(PingWaitDuration)); err != nil {
+			return err
+		}
 		return w.conn.SetWriteDeadline(time.Now().Add(PingWaitDuration))
 	})
 	w.conn.SetPongHandler(func(string) error {
-		return w.conn.SetReadDeadline(time.Now().Add(PingWaitDuration))
+		if err := w.conn.SetReadDeadline(time.Now().Add(PingWaitDuration)); err != nil {
+			return err
+		}
+		return w.conn.SetWriteDeadline(time.Now().Add(PingWaitDuration))
 	})
 }
