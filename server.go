@@ -17,6 +17,8 @@ var (
 
 type Authorizer func(req *http.Request) (clientKey string, authed bool, err error)
 type ErrorWriter func(rw http.ResponseWriter, req *http.Request, code int, err error)
+type OnConnect func(req *http.Request) error
+type OnDisconnect func(req *http.Request)
 
 func DefaultErrorWriter(rw http.ResponseWriter, req *http.Request, code int, err error) {
 	rw.WriteHeader(code)
@@ -29,6 +31,8 @@ type Server struct {
 	ClientConnectAuthorizer ConnectAuthorizer
 	authorizer              Authorizer
 	errorWriter             ErrorWriter
+	onConnect               OnConnect
+	onDisconnect            OnDisconnect
 	sessions                *sessionManager
 	peers                   map[string]peer
 	peerLock                sync.Mutex
@@ -41,6 +45,14 @@ func New(auth Authorizer, errorWriter ErrorWriter) *Server {
 		errorWriter: errorWriter,
 		sessions:    newSessionManager(),
 	}
+}
+
+func (s *Server) OnConnect(cb OnConnect) {
+	s.onConnect = cb
+}
+
+func (s *Server) OnDisconnect(cb OnDisconnect) {
+	s.onDisconnect = cb
 }
 
 func (s *Server) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -71,6 +83,22 @@ func (s *Server) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	session := s.sessions.add(clientKey, wsConn, peer)
 	session.auth = s.ClientConnectAuthorizer
 	defer s.sessions.remove(session)
+
+	// handle connect callback
+	if s.onConnect != nil {
+		err = s.onConnect(req)
+		if err != nil {
+			logrus.Infof("Error finish Connect Callback function for request [%s]: %v", clientKey, err)
+			return
+		}
+	}
+
+	// handle disconnect callback
+	defer func() {
+		if s.onDisconnect != nil {
+			s.onDisconnect(req)
+		}
+	}()
 
 	code, err := session.Serve(req.Context())
 	if err != nil {
